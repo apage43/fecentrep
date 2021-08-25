@@ -1,0 +1,8 @@
+tb_logs/
+fec-d-ckpt/
+data
+dask-worker-space/
+.ipynb_checkpoints/
+meta.pkl
+fecpreprocd.parquet
+__pycache__/
