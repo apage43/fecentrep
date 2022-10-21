@@ -40,10 +40,10 @@ def read_frame(header_file, data_file, dtypes={}, dask=False):
 def import_fec_data():
     dc = Client()
     print(dc)
-
+    basedir = "./data/2022"
     cm = read_frame(
-        "./data/cm_header_file.csv",
-        "./data/cm.txt",
+        f"{basedir}/cm_header_file.csv",
+        f"{basedir}/cm.txt",
         dtypes={
             c: "category"
             for c in (
@@ -56,8 +56,8 @@ def import_fec_data():
     ).set_index("CMTE_ID")
 
     oth = read_frame(
-        "./data/oth_header_file.csv",
-        "./data/itoth.txt",
+        f"{basedir}/oth_header_file.csv",
+        f"{basedir}/itoth.txt",
         dtypes={
             **{
                 c: "category"
@@ -105,27 +105,29 @@ def import_fec_data():
         sdf = l.fit_transform(sdf)
     sdf
 
-    sdf["tx_days_11-18"] = (
-        sdf["TRANSACTION_DT"] - pd.to_datetime("2018-11-01")
+    basedate = "2021-11-01"
+    dayscol = f"tx_days_{basedate[:-5]}"
+    sdf[dayscol] = (
+        sdf["TRANSACTION_DT"] - pd.to_datetime(basedate)
     ).dt.days
     amtscale = StandardScaler()
     dayscale = StandardScaler()
     sdf["amt_positive"] = sdf["TRANSACTION_AMT"] > 0
     sdf["amt_abs"] = sdf["TRANSACTION_AMT"].apply(np.abs)
     sdf["amt_scaled"] = amtscale.fit_transform(sdf[["amt_abs"]].values)
-    sdf["time_abs_scaled"] = dayscale.fit_transform(sdf[["tx_days_11-18"]].values)
+    sdf["time_abs_scaled"] = dayscale.fit_transform(sdf[[dayscol]].values)
     # "fourier features" to encode datetime
     fourfs = []
-    idt = sdf["tx_days_11-18"].values
+    idt = sdf[dayscol].values
 
     def add_ft(scl, fn, c):
         feat = f"dt_{scl}{c}"
         sdf[feat] = fn(idt)
+        fourfs.append(feat)
 
     for scl in [365, 90, 30, 7, 1]:
         add_ft(scl, np.sin, "s")
         add_ft(scl, np.cos, "c")
-    sdf
 
     bincols = ["amt_positive"]
     contcols = ["amt_scaled", "time_abs_scaled"] + fourfs

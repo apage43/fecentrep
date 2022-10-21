@@ -1,5 +1,5 @@
 tb_logs/
-fec-d-ckpt/
+fec-ckpt/
 data
 dask-worker-space/
 .ipynb_checkpoints/
