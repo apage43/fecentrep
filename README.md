@@ -5,7 +5,7 @@ Requires data from [FEC's bulk data page](https://www.fec.gov/data/browse-data/?
 requires `pytorch`, `pytorch-lightning`, `umap-learn`, `dask`, `fastparquet`, `scikit-learn`
 
 * run `fecdata.py` to generate `fecpreprocd.parquet` and `meta.pkl`
-* run `interpac_embedding.py` to train embeddings
+* run `tblenc.py` to train embeddings
 
 Model sees `["CMTE_ID","OTHER_ID","ENTITY_TP","TRANSACTION_TP","TRANSACTION_AMT","TRANSACTION_DT"]` of `itoth.txt` (Any transaction from one committee to another), `CMTE_ID` and `OTHER_ID` are both committee IDs, and so share embeddings. The learned embeddings can separate out many of the categories given for committees in the the Committee Master file `cm.txt`:
 

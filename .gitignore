@@ -1,3 +1,4 @@
+.vscode/
 tb_logs/
 fec-ckpt/
 data
@@ -6,3 +7,8 @@ dask-worker-space/
 meta.pkl
 fecpreprocd.parquet
 __pycache__/
+meta.json
+embeddings.npy
+interpactx.parquet/
+*.parquet
+knn.index
