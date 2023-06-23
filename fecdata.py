@@ -117,8 +117,8 @@ def import_fec_data(basedir = "./data", dc=None):
             cm = yearcm
             oth = yearoth
         else:
-            cm = cm.append(yearcm)
-            oth = oth.append(yearoth)
+            cm = pd.concat([cm, yearcm], axis=0)
+            oth = dd.multi.concat([oth,yearoth], axis=0)
     cm = cm.groupby("CMTE_ID").last().fillna("N/A")
 
     for cat in ["CMTE_DSGN", "CMTE_TP", "CMTE_PTY_AFFILIATION", "CMTE_FILING_FREQ"]:

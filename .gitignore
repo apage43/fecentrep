@@ -12,3 +12,4 @@ embeddings.npy
 interpactx.parquet/
 *.parquet
 knn.index
+env/

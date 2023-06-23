@@ -9,13 +9,12 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops.layers.torch import Rearrange, Reduce
+from einops.layers.torch import Rearrange
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, random_split
-from x_transformers import ContinuousTransformerWrapper, Decoder, Encoder
-from lightning.pytorch.strategies import FSDPStrategy, DDPStrategy
+from x_transformers import ContinuousTransformerWrapper, Encoder
 from covweighting import CoVWeightingLoss
 
 
