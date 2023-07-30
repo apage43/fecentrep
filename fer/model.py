@@ -17,6 +17,7 @@ class Config:
     transformer_layers: int = 10
     entity_dim: int = 256
     embedding_init_std: Optional[float] = 0.01
+    tied_encoder_decoder_emb: bool = False
 
 
 class Siren(nn.Module):
@@ -168,16 +169,23 @@ class FECDecoder(nn.Module):
                 nn.Linear(config.transformer_dim, config.transformer_dim, bias=False), nn.GELU(), m
             )
 
-        self.entdec = nldec(nn.Linear(config.transformer_dim, n_entities + 1))
+        if config.tied_encoder_decoder_emb:
+            self.entdec = None
+        else:
+            self.entdec = nn.Linear(config.transformer_dim, n_entities + 1)
         self.etdec = nn.Linear(config.transformer_dim, n_etype + 1)
         self.ttdec = nn.Linear(config.transformer_dim, n_ttype + 1)
         self.amtdec = nldec(nn.Linear(config.transformer_dim, 1))
         self.amtbindec = nn.Linear(config.transformer_dim, 1)
         self.datetimedec = nldec(nn.Linear(config.transformer_dim, 6)) # y,m,d,md,wd,yd
 
-    def forward(self, x):
-        srclogits = self.entdec(x[0])
-        dstlogits = self.entdec(x[1])
+    def forward(self, x, encoder: FECEncoder):
+        if self.entdec is not None:
+            srclogits = self.entdec(x[0])
+            dstlogits = self.entdec(x[1])
+        else:
+            srclogits = F.linear(x[0], encoder.entity_embeddings.weight)
+            dstlogits = F.linear(x[1], encoder.entity_embeddings.weight)
         etlogits = self.etdec(x[2])
         ttlogits = self.ttdec(x[3])
         amtd = self.amtdec(x[4])
