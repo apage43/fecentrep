@@ -1,0 +1,7 @@
+--find-links https://download.pytorch.org/whl/cu118
+isort
+black
+torch 
+torchvision 
+torchaudio
+x-transformers

@@ -1,0 +1,8 @@
+venv/
+wandb/
+interpactx.parquet/
+cm.parquet
+.vscode
+.ipynb_checkpoints/
+data
+*.pyc
