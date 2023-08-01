@@ -12,12 +12,14 @@ from x_transformers import Encoder, ContinuousTransformerWrapper
 
 @dataclass
 class Config:
-    transformer_dim: int = 256
-    transformer_heads: int = 8
-    transformer_layers: int = 10
-    entity_dim: int = 256
+    transformer_dim: int = 512
+    transformer_heads: int = 16
+    transformer_layers: int = 6
+    entity_dim: int = 512
+    entity_emb_normed: bool = False
     embedding_init_std: Optional[float] = 0.01
     tied_encoder_decoder_emb: bool = False
+    cos_sim_decode_entity: bool = False
 
 
 class Siren(nn.Module):
@@ -82,6 +84,7 @@ class DatetimeEncoder(nn.Module):
 class FECEncoder(nn.Module):
     def __init__(self, config: Config, n_entities: int, n_etype: int, n_ttype: int):
         super().__init__()
+        self.config = config
         self.entity_embeddings = nn.Embedding(
             n_entities, embedding_dim=config.entity_dim
         )
@@ -106,6 +109,9 @@ class FECEncoder(nn.Module):
     def forward(self, batch: Dict[str, torch.Tensor]):
         srcf = self.entity_embeddings(batch["src"]).squeeze()
         dstf = self.entity_embeddings(batch["dst"]).squeeze()
+        if self.config.entity_emb_normed:
+            srcf = F.normalize(srcf, dim=-1)
+            dstf = F.normalize(dstf, dim=-1)
         etypef = self.etype_embeddings(batch["etype"]).squeeze()
         ttypef = self.ttype_embeddings(batch["ttype"]).squeeze()
         amtf = F.gelu(self.amt_encoder(batch["amt"]))
@@ -172,7 +178,7 @@ class FECDecoder(nn.Module):
         if config.tied_encoder_decoder_emb:
             self.entdec = None
         else:
-            self.entdec = nn.Linear(config.transformer_dim, n_entities + 1)
+            self.entdec = nn.Linear(config.transformer_dim, n_entities + 1, bias=False)
         self.etdec = nn.Linear(config.transformer_dim, n_etype + 1)
         self.ttdec = nn.Linear(config.transformer_dim, n_ttype + 1)
         self.amtdec = nldec(nn.Linear(config.transformer_dim, 1))
@@ -180,12 +186,16 @@ class FECDecoder(nn.Module):
         self.datetimedec = nldec(nn.Linear(config.transformer_dim, 6)) # y,m,d,md,wd,yd
 
     def forward(self, x, encoder: FECEncoder):
-        if self.entdec is not None:
-            srclogits = self.entdec(x[0])
-            dstlogits = self.entdec(x[1])
+        if self.config.cos_sim_decode_entity:
+            maybenorm = lambda x: F.normalize(x, dim=-1)
         else:
-            srclogits = F.linear(x[0], encoder.entity_embeddings.weight)
-            dstlogits = F.linear(x[1], encoder.entity_embeddings.weight)
+            maybenorm = lambda x: x
+        if self.entdec is not None:
+            srclogits = F.linear(maybenorm(x[0]), maybenorm(self.entdec.weight))
+            dstlogits = F.linear(maybenorm(x[1]), maybenorm(self.entdec.weight))
+        else:
+            srclogits = F.linear(maybenorm(x[0]), maybenorm(encoder.entity_embeddings.weight))
+            dstlogits = F.linear(maybenorm(x[1]), maybenorm(encoder.entity_embeddings.weight))
         etlogits = self.etdec(x[2])
         ttlogits = self.ttdec(x[3])
         amtd = self.amtdec(x[4])
