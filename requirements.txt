@@ -5,3 +5,7 @@ torch
 torchvision 
 torchaudio
 x-transformers
+wandb
+jupyterlab
+tqdm
+ipywidgets
