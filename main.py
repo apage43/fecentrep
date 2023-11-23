@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 import fer.data as fecdata
 import torch.nn.functional as F
 from fer.model import Config, TabDataset, TabularDenoiser
@@ -143,7 +144,17 @@ def decoder_loss(encoded, batch):
     )
 
 
-def train():
+def train(squeeze: Optional[str] = None):
+    name = None
+    if squeeze:
+        squeeze = Path(squeeze)
+        name = squeeze.stem + '-squeezed'
+        # freeze everything
+        for p in model.parameters():
+            p.requires_grad = False
+        # unfreeze and reset embeddings
+        model.encoder.entity_embeddings.weight.requires_grad = True
+        torch.nn.init.normal_(model.encoder.entity_embeddings.weight, cfg.embedding_init_std)
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr,
@@ -154,7 +165,7 @@ def train():
     lossweighter = UncertaintyWeightedLoss(n_losses)
     torch.set_float32_matmul_precision("high")
     with wandb.init(
-        project="fecentrep2", save_code=True, config=dict(lr=lr, **asdict(cfg))
+        project="fecentrep2", save_code=True, name=name, config=dict(lr=lr, **asdict(cfg))
     ) as run:
         for epoch in range(n_epochs):
             with tqdm(tdl) as t:
@@ -218,12 +229,16 @@ def upload_atlas(filename: str, do_norm=True):
         )
         return cm
 
-    cmdf = idorder.join(
-        pd.concat([read_cm(2020), read_cm(2022), read_cm(2024)])
-        .drop_duplicates(subset=["CMTE_ID"], keep="last")
-        .set_index("CMTE_ID"),
-        on="CMTE_ID",
-    ).dropna(subset=["CMTE_NM"])
+    cmdf = (
+        idorder.join(
+            pd.concat([read_cm(2020), read_cm(2022), read_cm(2024)])
+            .drop_duplicates(subset=["CMTE_ID"], keep="last")
+            .set_index("CMTE_ID"),
+            on="CMTE_ID",
+        )
+        .dropna(subset=["CMTE_NM"])
+        .fillna("N/A")
+    )
     namedemb = entemb[cmdf.index]
 
     from nomic import atlas
@@ -231,7 +246,7 @@ def upload_atlas(filename: str, do_norm=True):
     atlas.map_embeddings(
         normalize(namedemb) if do_norm else namedemb,
         data=cmdf.reset_index(drop=True),
-        name="fecentrep-2" + ("-norm" if do_norm else "") + f'-{Path(filename).stem}',
+        name="fecentrep-2" + ("-norm" if do_norm else "") + f"-{Path(filename).stem}",
         colorable_fields=["CMTE_TP", "CMTE_DSGN", "ORG_TP", "CMTE_PTY_AFFILIATION"],
         id_field="CMTE_ID",
         topic_label_field="CMTE_NM",
