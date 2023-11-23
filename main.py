@@ -193,7 +193,7 @@ def train(squeeze: Optional[str] = None):
                     all_losses["total_loss"] = total_loss
                     wandb.log(dict(**all_losses, lr=scheduler.get_last_lr()[0]))
                     total_loss.backward()
-                    t.set_postfix(dict(loss=str(total_loss)))
+                    t.set_postfix(dict(loss=total_loss.item()))
                     optimizer.step()
                     scheduler.step()
         torch.save(model.state_dict(), f"{run.name}.bin")
