@@ -118,7 +118,7 @@ dtsks = sorted(k for k in dataset.keys() if k.startswith("scaled_dt_"))
 
 
 def decoder_loss(encoded, batch):
-    srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, dt_pred = model.decoder(
+    srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, dt_feat = model.decoder(
         encoded, model.encoder
     )
     srcloss = F.cross_entropy(srclogits, batch["src"].squeeze())
@@ -129,11 +129,7 @@ def decoder_loss(encoded, batch):
     amtposloss = F.binary_cross_entropy_with_logits(
         amtpos, batch["amt_pos"].to(torch.float)
     )
-    # print(dt_pred.shape)
-    dt_targets = torch.cat([batch[k].squeeze(dim=1) for k in dtsks], dim=1)
-    dt_targets_p = torch.hstack([dt_targets.sin(), dt_targets.cos()]) 
-    # print(dt_targets.shape)
-    dt_loss = F.mse_loss(dt_pred, dt_targets_p)
+
     return dict(
         srcloss=srcloss,
         dstloss=dstloss,
@@ -141,8 +137,7 @@ def decoder_loss(encoded, batch):
         ttloss=ttloss,
         amtloss=amtloss,
         amtposloss=amtposloss,
-        dt_loss=dt_loss,
-    )
+    ), dt_feat
 
 
 def train(squeeze: Optional[str] = None):
@@ -162,7 +157,7 @@ def train(squeeze: Optional[str] = None):
         lr=lr,
     )
     scheduler = WarmupCosineSchedule(optimizer, 1000, t_total=len(tdl) * n_epochs)
-    n_losses = 14
+    n_losses = 13
     # lossweighter = CoVWeightingLoss(n_losses)
     lossweighter = UncertaintyWeightedLoss(n_losses)
     torch.set_float32_matmul_precision("high")
@@ -175,8 +170,9 @@ def train(squeeze: Optional[str] = None):
                     batch = {k: v.to(device) for k, v in batch.items()}
                     model.zero_grad()
                     orig, corrupted, recovered = model(batch)
-                    enclosses = decoder_loss(orig, batch)
-                    reclosses = decoder_loss(recovered, batch)
+                    enclosses, dtf_orig = decoder_loss(orig, batch)
+                    reclosses, dtf_rec = decoder_loss(recovered, batch)
+                    dtf_match_loss = F.mse_loss(dtf_rec, dtf_orig)
                     # distloss = F.mse_loss(orig, recovered)
                     # margin = 0.1
                     # ocdiff = (orig != corrupted).max(dim=2).values.max(dim=0).values.float()
@@ -185,6 +181,7 @@ def train(squeeze: Optional[str] = None):
                     all_losses = {}
                     all_losses.update({f"enc/{k}": v for k, v in enclosses.items()})
                     all_losses.update({f"rec/{k}": v for k, v in reclosses.items()})
+                    all_losses['dt_match'] = dtf_match_loss
                     # all_losses['dist_loss'] = distloss
                     # all_losses['repel_loss'] = repel_loss
                     weighted_loss = lossweighter.forward(
