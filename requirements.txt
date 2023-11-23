@@ -14,3 +14,5 @@ pandas
 scikit-learn
 fastparquet
 dask[distributed]
+fire
+nomic

@@ -1,3 +1,4 @@
+from pathlib import Path
 import fer.data as fecdata
 import torch.nn.functional as F
 from fer.model import Config, TabDataset, TabularDenoiser
@@ -6,10 +7,13 @@ from torch.utils.data import DataLoader, random_split
 import torch.optim.lr_scheduler as lrsched
 import math
 from fer.multitask import UncertaintyWeightedLoss
-
+import fire
 from tqdm import tqdm
 import wandb
 from dataclasses import asdict
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import normalize
 
 device = "cuda:1"
 
@@ -184,63 +188,61 @@ def train():
     wandb.finish()
 
 
-# %%
-# from umap import UMAP
-# import umap.plot as upl
-# import holoviews as hv
-# hv.extension('bokeh')
-# entemb = model.encoder.entity_embeddings.weight.detach().cpu().numpy()
-# entemb.shape
-# import pandas as pd
-# id2cid = labelers['id_labeler'].encoder.classes_
-# idorder = pd.DataFrame({'CMTE_ID':id2cid})
-# def read_frame(header_file, data_file, dtypes={}):
-#     header = pd.read_csv(header_file)
-#     dt = {c: str for c in header.columns}
-#     dt.update(dtypes)
-#     data = pd.read_csv(data_file, sep="|", names=header.columns, dtype=dt)
-#     return data
+def upload_atlas(filename: str, do_norm=True):
+    model.load_state_dict(torch.load(filename))
+    entemb = model.encoder.entity_embeddings.weight.detach().cpu().numpy()
+    print(entemb.shape)
+    id2cid = labelers["id_labeler"].encoder.classes_
+    idorder = pd.DataFrame({"CMTE_ID": id2cid})
 
-# def read_cm(year, basedir='./data'):
-#     cm = read_frame(
-#         f"{basedir}/cm_header_file.csv",
-#         f"{basedir}/{year}/cm.txt",
-#         dtypes={
-#             c: "str"
-#             for c in (
-#                 "CMTE_DSGN",
-#                 "CMTE_TP",
-#                 "CMTE_PTY_AFFILIATION",
-#                 "CMTE_FILING_FREQ",
-#             )
-#         },
-#     )
-#     return cm
+    def read_frame(header_file, data_file, dtypes={}):
+        header = pd.read_csv(header_file)
+        dt = {c: str for c in header.columns}
+        dt.update(dtypes)
+        data = pd.read_csv(data_file, sep="|", names=header.columns, dtype=dt)
+        return data
 
-# cmdf = idorder.join(pd.concat([read_cm(2020), read_cm(2022), read_cm(2024)]).drop_duplicates(subset=['CMTE_ID'], keep='last').set_index('CMTE_ID'), on='CMTE_ID').dropna(subset=['CMTE_NM'])
-# namedemb = entemb[cmdf.index]
-# namedemb.shape
-# import numpy as np
-# uop = UMAP(verbose=True, metric='cosine')
-# e2d = uop.fit_transform(namedemb)
-# eframe = pd.DataFrame(e2d, columns=['x', 'y'])
-# sz=450
-# (hv.Points(eframe.join(cmdf.reset_index(drop=True))).opts(width=sz, height=sz, color='CMTE_PTY_AFFILIATION', cmap='Category20') +
-#  hv.Points(eframe.join(cmdf.reset_index(drop=True))).opts(width=sz, height=sz, color='CMTE_DSGN', cmap='Category20') +
-#  hv.Points(eframe.join(cmdf.reset_index(drop=True))).opts(width=sz, height=sz, color='CMTE_TP', cmap='Category20') +
-#  hv.Points(eframe.join(cmdf.reset_index(drop=True))).opts(width=sz, height=sz, color='ORG_TP', cmap='Category20')).cols(2)
-# def do_atlas(do_norm=True):
-#     from nomic import atlas
-#     from sklearn.preprocessing import normalize
+    def read_cm(year, basedir="./data"):
+        cm = read_frame(
+            f"{basedir}/cm_header_file.csv",
+            f"{basedir}/{year}/cm.txt",
+            dtypes={
+                c: "str"
+                for c in (
+                    "CMTE_DSGN",
+                    "CMTE_TP",
+                    "CMTE_PTY_AFFILIATION",
+                    "CMTE_FILING_FREQ",
+                )
+            },
+        )
+        return cm
 
-#     atlas.map_embeddings(
-#         normalize(namedemb) if do_norm else namedemb,
-#         data=cmdf.reset_index(drop=True),
-#         name='fecentrep-2' + ('-norm' if do_norm else ''),
-#         colorable_fields=['CMTE_TP', 'CMTE_DSGN', 'ORG_TP', 'CMTE_PTY_AFFILIATION'],
-#         id_field='CMTE_ID',
-#         #topic_label_field='CMTE_NM',
-#         reset_project_if_exists=True,
-#     )
-# # do_atlas(do_norm=True)
-# # do_atlas(do_norm=False)
+    cmdf = idorder.join(
+        pd.concat([read_cm(2020), read_cm(2022), read_cm(2024)])
+        .drop_duplicates(subset=["CMTE_ID"], keep="last")
+        .set_index("CMTE_ID"),
+        on="CMTE_ID",
+    ).dropna(subset=["CMTE_NM"]).fillna('N/A')
+    namedemb = entemb[cmdf.index]
+
+    from nomic import atlas
+
+    atlas.map_embeddings(
+        normalize(namedemb) if do_norm else namedemb,
+        data=cmdf.reset_index(drop=True),
+        name="fecentrep-2" + ("-norm" if do_norm else "") + f'-{Path(filename).stem}',
+        colorable_fields=["CMTE_TP", "CMTE_DSGN", "ORG_TP", "CMTE_PTY_AFFILIATION"],
+        id_field="CMTE_ID",
+        topic_label_field="CMTE_NM",
+        reset_project_if_exists=True,
+    )
+
+
+if __name__ == "__main__":
+    fire.Fire(
+        {
+            "train": train,
+            "atlas": upload_atlas,
+        }
+    )
