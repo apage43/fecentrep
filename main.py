@@ -148,13 +148,14 @@ def train(squeeze: Optional[str] = None):
     name = None
     if squeeze:
         squeeze = Path(squeeze)
+        model.load_state_dict(torch.load(squeeze))
         name = squeeze.stem + '-squeezed'
         # freeze everything
         for p in model.parameters():
             p.requires_grad = False
         # unfreeze and reset embeddings
         model.encoder.entity_embeddings.weight.requires_grad = True
-        torch.nn.init.normal_(model.encoder.entity_embeddings.weight, cfg.embedding_init_std)
+        torch.nn.init.normal_(model.encoder.entity_embeddings.weight, 0.5)
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr,
