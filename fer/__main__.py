@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from .model import *
 
 
 def fer():

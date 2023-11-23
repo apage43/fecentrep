@@ -1,4 +1,5 @@
 venv/
+env/
 wandb/
 interpactx.parquet/
 cm.parquet
@@ -6,3 +7,4 @@ cm.parquet
 .ipynb_checkpoints/
 data
 *.pyc
+*.bin

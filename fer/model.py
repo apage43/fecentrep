@@ -1,7 +1,6 @@
 import math
-from abc import ABC
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 import torch
 import einops
@@ -172,7 +171,9 @@ class FECDecoder(nn.Module):
 
         def nldec(m):
             return nn.Sequential(
-                nn.Linear(config.transformer_dim, config.transformer_dim, bias=False), nn.GELU(), m
+                nn.Linear(config.transformer_dim, config.transformer_dim, bias=False),
+                nn.GELU(),
+                m,
             )
 
         if config.tied_encoder_decoder_emb:
@@ -183,7 +184,7 @@ class FECDecoder(nn.Module):
         self.ttdec = nn.Linear(config.transformer_dim, n_ttype + 1)
         self.amtdec = nldec(nn.Linear(config.transformer_dim, 1))
         self.amtbindec = nn.Linear(config.transformer_dim, 1)
-        self.datetimedec = nldec(nn.Linear(config.transformer_dim, 6)) # y,m,d,md,wd,yd
+        self.datetimedec = nldec(nn.Linear(config.transformer_dim, 6))  # y,m,d,md,wd,yd
 
     def forward(self, x, encoder: FECEncoder):
         if self.config.cos_sim_decode_entity:
@@ -194,8 +195,12 @@ class FECDecoder(nn.Module):
             srclogits = F.linear(maybenorm(x[0]), maybenorm(self.entdec.weight))
             dstlogits = F.linear(maybenorm(x[1]), maybenorm(self.entdec.weight))
         else:
-            srclogits = F.linear(maybenorm(x[0]), maybenorm(encoder.entity_embeddings.weight))
-            dstlogits = F.linear(maybenorm(x[1]), maybenorm(encoder.entity_embeddings.weight))
+            srclogits = F.linear(
+                maybenorm(x[0]), maybenorm(encoder.entity_embeddings.weight)
+            )
+            dstlogits = F.linear(
+                maybenorm(x[1]), maybenorm(encoder.entity_embeddings.weight)
+            )
         etlogits = self.etdec(x[2])
         ttlogits = self.ttdec(x[3])
         amtd = self.amtdec(x[4])

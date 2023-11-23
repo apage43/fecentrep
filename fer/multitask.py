@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class UncertaintyWeightedLoss(nn.Module):
     def __init__(self, num=2):
         super().__init__()
@@ -10,8 +11,11 @@ class UncertaintyWeightedLoss(nn.Module):
     def forward(self, x):
         loss_sum = 0
         for i, loss in enumerate(x):
-            loss_sum += 0.5 / (self.params[i] ** 2) * loss + torch.log(1 + self.params[i] ** 2)
+            loss_sum += 0.5 / (self.params[i] ** 2) * loss + torch.log(
+                1 + self.params[i] ** 2
+            )
         return loss_sum
+
 
 class CoVWeightingLoss(nn.Module):
 

@@ -9,3 +9,8 @@ wandb
 jupyterlab
 tqdm
 ipywidgets
+ipykernel
+pandas
+scikit-learn
+fastparquet
+dask[distributed]

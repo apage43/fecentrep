@@ -1,8 +1,6 @@
-import pickle
-from pathlib import Path
 
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder
 
 
 class IdentifierLabeler:

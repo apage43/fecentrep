@@ -75,7 +75,9 @@ def prepare(df: pd.DataFrame):
     amtscaler = StandardScaler()
 
     # i want to predict rough order of magnitude more than the exact dollar amount
-    df = df.assign(amt_scaled=amtscaler.fit_transform(np.log10(df[["amt_absolute"]].values + 1)))
+    df = df.assign(
+        amt_scaled=amtscaler.fit_transform(np.log10(df[["amt_absolute"]].values + 1))
+    )
     df = add_datepart(df, "TRANSACTION_DT", prefix="")
 
     dataset = dict(
@@ -93,8 +95,8 @@ def prepare(df: pd.DataFrame):
         dt_yearday=df["Dayofyear"].values,
     )
 
-    dtscalers = {k: StandardScaler() for k in dataset.keys() if k.startswith('dt_')}
+    dtscalers = {k: StandardScaler() for k in dataset.keys() if k.startswith("dt_")}
     for k in dtscalers.keys():
         scaled = dtscalers[k].fit_transform(dataset[k].reshape(-1, 1))
-        dataset[f'scaled_{k}'] = scaled
+        dataset[f"scaled_{k}"] = scaled
     return (dataset, df, labelers)
