@@ -185,6 +185,9 @@ class FECDecoder(nn.Module):
         self.amtdec = nldec(nn.Linear(config.transformer_dim, 1))
         self.amtbindec = nn.Linear(config.transformer_dim, 1)
         self.datetimedec = nldec(nn.Linear(config.transformer_dim, 6))  # y,m,d,md,wd,yd
+        self.register_buffer(
+            "dtscales", torch.tensor([10, 12, 52, 32, 7, 365]), persistent=False
+        )
 
     def forward(self, x, encoder: FECEncoder):
         if self.config.cos_sim_decode_entity:
@@ -205,8 +208,16 @@ class FECDecoder(nn.Module):
         ttlogits = self.ttdec(x[3])
         amtd = self.amtdec(x[4])
         amtpos = self.amtbindec(x[4])
-        dtime = self.datetimedec(x[5])
-        return srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, dtime
+        dtime = self.datetimedec(x[5]) * self.dtscales
+        return (
+            srclogits,
+            dstlogits,
+            etlogits,
+            ttlogits,
+            amtd,
+            amtpos,
+            torch.hstack([dtime.sin(), dtime.cos()]),
+        )
 
 
 class TabularDenoiser(nn.Module):
@@ -224,6 +235,7 @@ class TabularDenoiser(nn.Module):
         self.tfenc = ContinuousTransformerWrapper(
             max_seq_len=6,
             emb_dropout=0.2,
+            num_memory_tokens=2,
             attn_layers=Encoder(
                 dim=config.transformer_dim,
                 depth=config.transformer_layers,

@@ -23,13 +23,13 @@ dataset, df, labelers = fecdata.prepare(df)
 
 
 cfg = Config(
-    embedding_init_std=1 / 512.0,
+    embedding_init_std=1 / 384.0,
     tied_encoder_decoder_emb=True,
     entity_emb_normed=False,
     cos_sim_decode_entity=False,
     transformer_dim=384,
-    transformer_heads=12,
-    transformer_layers=8,
+    transformer_heads=16,
+    transformer_layers=6,
     entity_dim=384,
 )
 lr = 1e-3
@@ -49,7 +49,7 @@ model = torch.compile(model)
 
 # %%
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 3000
+batch_size = 2800
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
@@ -131,8 +131,9 @@ def decoder_loss(encoded, batch):
     )
     # print(dt_pred.shape)
     dt_targets = torch.cat([batch[k].squeeze(dim=1) for k in dtsks], dim=1)
+    dt_targets_p = torch.hstack([dt_targets.sin(), dt_targets.cos()]) 
     # print(dt_targets.shape)
-    dt_loss = F.mse_loss(dt_pred, dt_targets)
+    dt_loss = F.mse_loss(dt_pred, dt_targets_p)
     return dict(
         srcloss=srcloss,
         dstloss=dstloss,
