@@ -24,7 +24,7 @@ dataset, df, labelers = fecdata.prepare(df)
 
 cfg = Config(
     embedding_init_std=1 / 384.0,
-    tied_encoder_decoder_emb=True,
+    tied_encoder_decoder_emb=False,
     entity_emb_normed=False,
     cos_sim_decode_entity=False,
     transformer_dim=384,
@@ -140,9 +140,10 @@ def decoder_loss(encoded, batch):
     ), dt_feat
 
 
-def train(squeeze: Optional[str] = None):
+def train(squeeze: Optional[str] = None, epochs=n_epochs):
     name = None
     if squeeze:
+        epochs = epochs // 2
         squeeze = Path(squeeze)
         model.load_state_dict(torch.load(squeeze))
         name = squeeze.stem + '-squeezed'
@@ -151,12 +152,12 @@ def train(squeeze: Optional[str] = None):
             p.requires_grad = False
         # unfreeze and reset embeddings
         model.encoder.entity_embeddings.weight.requires_grad = True
-        torch.nn.init.normal_(model.encoder.entity_embeddings.weight, 0.5)
+        torch.nn.init.normal_(model.encoder.entity_embeddings.weight, cfg.embedding_init_std)
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr,
     )
-    scheduler = WarmupCosineSchedule(optimizer, 1000, t_total=len(tdl) * n_epochs)
+    scheduler = WarmupCosineSchedule(optimizer, 1000, t_total=len(tdl) * epochs)
     n_losses = 13
     # lossweighter = CoVWeightingLoss(n_losses)
     lossweighter = UncertaintyWeightedLoss(n_losses)
@@ -164,7 +165,7 @@ def train(squeeze: Optional[str] = None):
     with wandb.init(
         project="fecentrep2", save_code=True, name=name, config=dict(lr=lr, **asdict(cfg))
     ) as run:
-        for epoch in range(n_epochs):
+        for epoch in range(epochs):
             with tqdm(tdl) as t:
                 for i, batch in enumerate(t):
                     batch = {k: v.to(device) for k, v in batch.items()}
