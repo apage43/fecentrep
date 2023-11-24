@@ -34,8 +34,8 @@ cfg = Config(
     transformer_layers=6,
     entity_dim=256,
 )
-lr = 4e-3
-n_epochs = 8
+lr = 1e-3
+n_epochs = 32
 model = TabularDenoiser(
     cfg,
     n_entities=max(dataset["src"].max(), dataset["dst"].max()) + 1,
@@ -44,8 +44,8 @@ model = TabularDenoiser(
 )
 tds = TabDataset(dataset)
 
-model = model.to(device)
-# model = torch.compile(model)
+model = model
+model = torch.compile(model)
 
 splitgen = torch.Generator().manual_seed(41)
 batch_size = 10000

@@ -189,9 +189,11 @@ class FECDecoder(nn.Module):
 
     def forward(self, x, encoder: FECEncoder):
         if self.config.cos_sim_decode_entity:
-            maybenorm = lambda x: F.normalize(x, dim=-1)
+            def maybenorm(x):
+                return F.normalize(x, dim=-1)
         else:
-            maybenorm = lambda x: x
+            def maybenorm(x):
+                return x
         if self.entdec is not None:
             srclogits = F.linear(maybenorm(x[0]), maybenorm(self.entdec.weight))
             dstlogits = F.linear(maybenorm(x[1]), maybenorm(self.entdec.weight))
