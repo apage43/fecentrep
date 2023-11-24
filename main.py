@@ -15,25 +15,27 @@ from dataclasses import asdict
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import normalize
+from accelerate import Accelerator
 
-device = "cuda:1"
+accelerator = Accelerator()
+device = "cuda"
 
 df = fecdata.pac_to_pac_transactions()
 dataset, df, labelers = fecdata.prepare(df)
 
 
 cfg = Config(
-    embedding_init_std=1 / 384.0,
+    embedding_init_std=1 / 256.0,
     tied_encoder_decoder_emb=False,
     entity_emb_normed=False,
     cos_sim_decode_entity=False,
-    transformer_dim=384,
-    transformer_heads=12,
-    transformer_layers=8,
-    entity_dim=384,
+    transformer_dim=256,
+    transformer_heads=16,
+    transformer_layers=6,
+    entity_dim=256,
 )
-lr = 1e-3
-n_epochs = 4
+lr = 4e-3
+n_epochs = 8
 model = TabularDenoiser(
     cfg,
     n_entities=max(dataset["src"].max(), dataset["dst"].max()) + 1,
@@ -43,10 +45,10 @@ model = TabularDenoiser(
 tds = TabDataset(dataset)
 
 model = model.to(device)
-model = torch.compile(model)
+# model = torch.compile(model)
 
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 2200
+batch_size = 10000
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
@@ -114,14 +116,15 @@ class WarmupCosineSchedule(lrsched.LambdaLR):
 dtsks = sorted(k for k in dataset.keys() if k.startswith("scaled_dt_"))
 
 
-def decoder_loss(encoded, batch):
-    srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, dt_feat = model.decoder(
+def decoder_loss(encoded, batch, mask):
+    srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, maskpred, dt_feat = model.decoder(
         encoded, model.encoder
     )
     srcloss = F.cross_entropy(srclogits, batch["src"].squeeze())
     dstloss = F.cross_entropy(dstlogits, batch["dst"].squeeze())
     etloss = F.cross_entropy(etlogits, batch["etype"].squeeze())
     ttloss = F.cross_entropy(ttlogits, batch["ttype"].squeeze())
+    maskloss = F.binary_cross_entropy_with_logits(maskpred, mask.to(torch.float))
     amtloss = F.mse_loss(amtd, batch["amt"])
     amtposloss = F.binary_cross_entropy_with_logits(
         amtpos, batch["amt_pos"].to(torch.float)
@@ -134,10 +137,12 @@ def decoder_loss(encoded, batch):
         ttloss=ttloss,
         amtloss=amtloss,
         amtposloss=amtposloss,
+        maskloss=maskloss,
     ), dt_feat
 
 
 def train(squeeze: Optional[str] = None, epochs=n_epochs):
+    global model, tdl, vdl
     name = None
     if squeeze:
         epochs = epochs // 2
@@ -156,8 +161,8 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr,
     )
-    scheduler = WarmupCosineSchedule(optimizer, 1000, t_total=len(tdl) * epochs)
-    n_losses = 7
+    scheduler = WarmupCosineSchedule(optimizer, 100, t_total=len(tdl) * epochs)
+    n_losses = 8
     # lossweighter = CoVWeightingLoss(n_losses)
     lossweighter = UncertaintyWeightedLoss(n_losses)
     torch.set_float32_matmul_precision("high")
@@ -168,6 +173,7 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
         config=dict(lr=lr, **asdict(cfg)),
     ) as run:
         tstep = 0
+
         def do_validation():
             with torch.no_grad():
                 with tqdm(vdl, desc="val") as t:
@@ -175,9 +181,9 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
                     total_val_loss = None
                     for i, batch in enumerate(t):
                         batch = {k: v.to(device) for k, v in batch.items()}
-                        orig, corrupted, recovered = model(batch)
-                        _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
-                        reclosses, dtf_rec = decoder_loss(recovered, batch)
+                        orig, corrupted, recovered, mask = model(batch)
+                        _, _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
+                        reclosses, dtf_rec = decoder_loss(recovered, batch, mask)
                         dtf_match_loss = F.mse_loss(dtf_rec, dtf_orig)
                         all_losses = {}
                         # all_losses.update({f"enc/{k}": v for k, v in enclosses.items()})
@@ -196,19 +202,23 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
                         {
                             "val/avg_loss": total_val_loss / (i + 1),
                             "val/avg_dt_loss": dtf_match_loss / (i + 1),
-                        }, step=tstep
+                        },
+                        step=tstep,
                     )
 
-        do_validation()
+        model, optimizer, tdl, vdl, scheduler = accelerator.prepare(
+            model, optimizer, tdl, vdl, scheduler
+        )
+
         for epoch in range(epochs):
             with tqdm(tdl) as t:
                 for i, batch in enumerate(t):
                     batch = {k: v.to(device) for k, v in batch.items()}
                     model.zero_grad()
-                    orig, corrupted, recovered = model(batch)
+                    orig, corrupted, recovered, mask = model(batch)
                     # enclosses, dtf_orig = decoder_loss(orig, batch)
-                    _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
-                    reclosses, dtf_rec = decoder_loss(recovered, batch)
+                    _, _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
+                    reclosses, dtf_rec = decoder_loss(recovered, batch, mask)
                     dtf_match_loss = F.mse_loss(dtf_rec, dtf_orig)
                     # distloss = F.mse_loss(orig, recovered)
                     # margin = 0.1
@@ -226,8 +236,11 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
                     )
                     total_loss = weighted_loss
                     all_losses["total_loss"] = total_loss
-                    wandb.log(dict(**all_losses, lr=scheduler.get_last_lr()[0]), step=tstep)
-                    total_loss.backward()
+                    wandb.log(
+                        dict(**all_losses, lr=scheduler.get_last_lr()[0]), step=tstep
+                    )
+                    # total_loss.backward()
+                    accelerator.backward(total_loss)
                     t.set_postfix(dict(loss=total_loss.item()))
                     optimizer.step()
                     scheduler.step()

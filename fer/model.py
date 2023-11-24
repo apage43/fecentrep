@@ -136,11 +136,12 @@ class BatchSwapNoise(nn.Module):
                 * (p[:, None] if isinstance(p, torch.Tensor) else p)
             )
             noised = torch.where(corrupt == 1, x[torch.randperm(x.shape[0])], x)
-            return noised
+            corrupt = ~torch.isclose(noised, x)
+            return (noised, corrupt)
         else:
             if isinstance(x, dict):
                 x["p"] = p
-            return x
+            return (x, torch.zeros_like(x))
 
 
 def tdtype(k):
@@ -184,6 +185,7 @@ class FECDecoder(nn.Module):
         self.ttdec = nn.Linear(config.transformer_dim, n_ttype + 1)
         self.amtdec = nldec(nn.Linear(config.transformer_dim, 1))
         self.amtbindec = nn.Linear(config.transformer_dim, 1)
+        self.corruptdec = nn.Linear(config.transformer_dim, 1)
 
     def forward(self, x, encoder: FECEncoder):
         if self.config.cos_sim_decode_entity:
@@ -200,11 +202,13 @@ class FECDecoder(nn.Module):
             dstlogits = F.linear(
                 maybenorm(x[1]), maybenorm(encoder.entity_embeddings.weight)
             )
+        mask = self.corruptdec(x)
+        mask = einops.rearrange(mask, "s b e -> b (s e)")
         etlogits = self.etdec(x[2])
         ttlogits = self.ttdec(x[3])
         amtd = self.amtdec(x[4])
         amtpos = self.amtbindec(x[4])
-        return (srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, x[5])
+        return (srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, mask, x[5])
 
 
 class TabularDenoiser(nn.Module):
@@ -226,14 +230,15 @@ class TabularDenoiser(nn.Module):
             attn_layers=Encoder(
                 dim=config.transformer_dim,
                 depth=config.transformer_layers,
-                use_rmsnorm=True,
-                deepnorm=True,
+                #use_rmsnorm=True,
+                #deepnorm=True,
                 ff_mult=4,
+                rotary_pos_emb=True,
                 attn_flash=True,
                 heads=config.transformer_heads,
-                ff_dropout=0.2,
+                ff_dropout=0.5,
                 no_bias_ff=True,
-                add_zero_kv=True,
+                # add_zero_kv=True,
                 zero_init_branch_output=True,
             ),
             post_emb_norm=False,
@@ -242,7 +247,9 @@ class TabularDenoiser(nn.Module):
     def forward(self, batch: Dict[str, torch.Tensor]):
         original = self.encoder(batch)
         noised = self.bnoise(batch, p=0.15)
-        corrupted = self.encoder(noised)
+        del noised['p']
+        corrupted = self.encoder({k: t for (k, (t, _mask)) in noised.items() if k != 'p'})
+        mask = torch.hstack([noised[c][1] for c in ['src', 'dst', 'etype', 'ttype', 'amt', 'amt_pos']])
         recovered = self.tfenc(einops.rearrange(corrupted, "s b d -> b s d"))
         recovered = einops.rearrange(recovered, "b s d -> s b d")
-        return original, corrupted, recovered
+        return original, corrupted, recovered, mask
