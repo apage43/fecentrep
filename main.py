@@ -25,14 +25,14 @@ dataset, df, labelers = fecdata.prepare(df)
 cfg = Config(
     embedding_init_std=1 / 384.0,
     tied_encoder_decoder_emb=False,
-    entity_emb_normed=True,
+    entity_emb_normed=False,
     cos_sim_decode_entity=False,
     transformer_dim=384,
-    transformer_heads=16,
+    transformer_heads=12,
     transformer_layers=8,
     entity_dim=384,
 )
-lr = 3e-4
+lr = 1e-3
 n_epochs = 4
 model = TabularDenoiser(
     cfg,
@@ -42,28 +42,25 @@ model = TabularDenoiser(
 )
 tds = TabDataset(dataset)
 
-# %%
-
 model = model.to(device)
 model = torch.compile(model)
 
-# %%
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 2000
+batch_size = 2200
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
     batch_size=batch_size,
     shuffle=True,
     num_workers=8,
-    # persistent_workers=True,
+    persistent_workers=True,
 )
 vdl = DataLoader(
     val_set,
     batch_size=batch_size,
     shuffle=False,
     num_workers=8,
-    # persistent_workers=True,
+    persistent_workers=True,
 )
 
 # %%
@@ -146,32 +143,71 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
         epochs = epochs // 2
         squeeze = Path(squeeze)
         model.load_state_dict(torch.load(squeeze))
-        name = squeeze.stem + '-squeezed'
+        name = squeeze.stem + "-squeezed"
         # freeze everything
         for p in model.parameters():
             p.requires_grad = False
         # unfreeze and reset embeddings
         model.encoder.entity_embeddings.weight.requires_grad = True
-        torch.nn.init.normal_(model.encoder.entity_embeddings.weight, cfg.embedding_init_std)
+        torch.nn.init.normal_(
+            model.encoder.entity_embeddings.weight, cfg.embedding_init_std
+        )
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr,
     )
     scheduler = WarmupCosineSchedule(optimizer, 1000, t_total=len(tdl) * epochs)
-    n_losses = 13
+    n_losses = 7
     # lossweighter = CoVWeightingLoss(n_losses)
     lossweighter = UncertaintyWeightedLoss(n_losses)
     torch.set_float32_matmul_precision("high")
     with wandb.init(
-        project="fecentrep2", save_code=True, name=name, config=dict(lr=lr, **asdict(cfg))
+        project="fecentrep2",
+        save_code=True,
+        name=name,
+        config=dict(lr=lr, **asdict(cfg)),
     ) as run:
+        tstep = 0
+        def do_validation():
+            with torch.no_grad():
+                with tqdm(vdl, desc="val") as t:
+                    dtf_match_loss = None
+                    total_val_loss = None
+                    for i, batch in enumerate(t):
+                        batch = {k: v.to(device) for k, v in batch.items()}
+                        orig, corrupted, recovered = model(batch)
+                        _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
+                        reclosses, dtf_rec = decoder_loss(recovered, batch)
+                        dtf_match_loss = F.mse_loss(dtf_rec, dtf_orig)
+                        all_losses = {}
+                        # all_losses.update({f"enc/{k}": v for k, v in enclosses.items()})
+                        all_losses.update(
+                            {f"val/rec/{k}": v for k, v in reclosses.items()}
+                        )
+                        all_losses["val/dt_match"] = dtf_match_loss
+                        total_loss = sum(all_losses.values())
+                        total_val_loss = (
+                            total_loss
+                            if total_val_loss is None
+                            else total_val_loss + total_loss
+                        )
+                        t.set_postfix(dict(loss=total_loss.item()))
+                    wandb.log(
+                        {
+                            "val/avg_loss": total_val_loss / (i + 1),
+                            "val/avg_dt_loss": dtf_match_loss / (i + 1),
+                        }, step=tstep
+                    )
+
+        do_validation()
         for epoch in range(epochs):
             with tqdm(tdl) as t:
                 for i, batch in enumerate(t):
                     batch = {k: v.to(device) for k, v in batch.items()}
                     model.zero_grad()
                     orig, corrupted, recovered = model(batch)
-                    enclosses, dtf_orig = decoder_loss(orig, batch)
+                    # enclosses, dtf_orig = decoder_loss(orig, batch)
+                    _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
                     reclosses, dtf_rec = decoder_loss(recovered, batch)
                     dtf_match_loss = F.mse_loss(dtf_rec, dtf_orig)
                     # distloss = F.mse_loss(orig, recovered)
@@ -180,9 +216,9 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
                     # rec_corrupt_err = ((recovered-corrupted).pow(2).mean(dim=2).mean(dim=0) * ocdiff).sum() / ocdiff.sum()
                     # repel_loss = F.relu(margin - rec_corrupt_err)
                     all_losses = {}
-                    all_losses.update({f"enc/{k}": v for k, v in enclosses.items()})
+                    # all_losses.update({f"enc/{k}": v for k, v in enclosses.items()})
                     all_losses.update({f"rec/{k}": v for k, v in reclosses.items()})
-                    all_losses['dt_match'] = dtf_match_loss
+                    all_losses["dt_match"] = dtf_match_loss
                     # all_losses['dist_loss'] = distloss
                     # all_losses['repel_loss'] = repel_loss
                     weighted_loss = lossweighter.forward(
@@ -190,12 +226,14 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
                     )
                     total_loss = weighted_loss
                     all_losses["total_loss"] = total_loss
-                    wandb.log(dict(**all_losses, lr=scheduler.get_last_lr()[0]))
+                    wandb.log(dict(**all_losses, lr=scheduler.get_last_lr()[0]), step=tstep)
                     total_loss.backward()
                     t.set_postfix(dict(loss=total_loss.item()))
                     optimizer.step()
                     scheduler.step()
-        torch.save(model.state_dict(), f"{run.name}.bin")
+                    tstep += 1
+            do_validation()
+            torch.save(model.state_dict(), f"{run.name}-e{epoch}.bin")
     wandb.finish()
 
 
