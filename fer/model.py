@@ -248,7 +248,7 @@ class TabularDenoiser(nn.Module):
 
     def forward(self, batch: Dict[str, torch.Tensor]):
         original = self.encoder(batch)
-        noised = self.bnoise(batch, p=0.15)
+        noised = self.bnoise(batch, p=0.25)
         del noised['p']
         corrupted = self.encoder({k: t for (k, (t, _mask)) in noised.items() if k != 'p'})
         mask = torch.hstack([noised[c][1] for c in ['src', 'dst', 'etype', 'ttype', 'amt', 'amt_pos']])

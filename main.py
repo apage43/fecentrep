@@ -31,7 +31,7 @@ cfg = Config(
     cos_sim_decode_entity=True,
     transformer_dim=256,
     transformer_heads=8,
-    transformer_layers=10,
+    transformer_layers=12,
     entity_dim=256,
 )
 lr = 1e-3
