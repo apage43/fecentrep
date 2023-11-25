@@ -26,12 +26,12 @@ dataset, df, labelers = fecdata.prepare(df)
 
 cfg = Config(
     embedding_init_std=1 / 256.0,
-    tied_encoder_decoder_emb=False,
+    tied_encoder_decoder_emb=True,
     entity_emb_normed=False,
-    cos_sim_decode_entity=False,
+    cos_sim_decode_entity=True,
     transformer_dim=256,
-    transformer_heads=16,
-    transformer_layers=6,
+    transformer_heads=8,
+    transformer_layers=10,
     entity_dim=256,
 )
 lr = 1e-3
@@ -44,11 +44,10 @@ model = TabularDenoiser(
 )
 tds = TabDataset(dataset)
 
-model = model
-model = torch.compile(model)
+# model = torch.compile(model)
 
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 10000
+batch_size = 10_000
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
@@ -120,8 +119,12 @@ def decoder_loss(encoded, batch, mask):
     srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, maskpred, dt_feat = model.decoder(
         encoded, model.encoder
     )
-    srcloss = F.cross_entropy(srclogits, batch["src"].squeeze())
-    dstloss = F.cross_entropy(dstlogits, batch["dst"].squeeze())
+    if model.config.cos_sim_decode_entity:
+        srcloss = F.mse_loss(srclogits, F.one_hot(batch["src"].squeeze(), srclogits.shape[-1]).to(torch.float)) * 1000.0
+        dstloss = F.mse_loss(dstlogits, F.one_hot(batch["dst"].squeeze(), dstlogits.shape[-1]).to(torch.float)) * 1000.0
+    else:
+        srcloss = F.cross_entropy(srclogits, batch["src"].squeeze())
+        dstloss = F.cross_entropy(dstlogits, batch["dst"].squeeze())
     etloss = F.cross_entropy(etlogits, batch["etype"].squeeze())
     ttloss = F.cross_entropy(ttlogits, batch["ttype"].squeeze())
     maskloss = F.binary_cross_entropy_with_logits(maskpred, mask.to(torch.float))
@@ -251,7 +254,9 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
 
 
 def upload_atlas(filename: str, do_norm=True):
-    model.load_state_dict(torch.load(filename))
+    sd = torch.load(filename)
+    sd = {k.replace('_orig_mod.', ''): v for k, v in sd.items()}
+    model.load_state_dict(sd)
     entemb = model.encoder.entity_embeddings.weight.detach().cpu().numpy()
     print(entemb.shape)
     id2cid = labelers["id_labeler"].encoder.classes_
@@ -300,7 +305,7 @@ def upload_atlas(filename: str, do_norm=True):
         name="fecentrep-2" + ("-norm" if do_norm else "") + f"-{Path(filename).stem}",
         colorable_fields=["CMTE_TP", "CMTE_DSGN", "ORG_TP", "CMTE_PTY_AFFILIATION"],
         id_field="CMTE_ID",
-        topic_label_field="CMTE_NM",
+        # topic_label_field="CMTE_NM",
         reset_project_if_exists=True,
     )
 
