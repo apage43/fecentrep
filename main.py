@@ -25,17 +25,17 @@ dataset, df, labelers = fecdata.prepare(df)
 
 
 cfg = Config(
-    embedding_init_std=1 / 256.0,
+    embedding_init_std=1 / 384.0,
     tied_encoder_decoder_emb=True,
     entity_emb_normed=False,
     cos_sim_decode_entity=False,
-    transformer_dim=256,
-    transformer_heads=8,
+    transformer_dim=384,
+    transformer_heads=12,
     transformer_layers=12,
-    entity_dim=256,
+    entity_dim=384,
 )
 lr = 1e-3
-n_epochs = 32
+n_epochs = 64
 model = TabularDenoiser(
     cfg,
     n_entities=max(dataset["src"].max(), dataset["dst"].max()) + 1,
@@ -47,7 +47,7 @@ tds = TabDataset(dataset)
 # model = torch.compile(model)
 
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 10_000
+batch_size = 9_000
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
@@ -300,7 +300,7 @@ def upload_atlas(filename: str, do_norm=True, extra_proj=['pca', 'umap']):
 
     if 'umap' in extra_proj:
         from umap import UMAP
-        uop = UMAP(verbose=True, n_jobs=-1, min_dist=0.01, metric='cosine')
+        uop = UMAP(verbose=True, n_jobs=-1, metric='cosine')
         u2d = uop.fit_transform(namedemb)
         data = data.assign(umap1=-1 * u2d[:,0], umap2=u2d[:,1])
 
