@@ -296,13 +296,13 @@ def upload_atlas(filename: str, do_norm=True, extra_proj=['pca', 'umap']):
         from sklearn.decomposition import PCA
         pca_op = PCA(n_components=2)
         pca2d = pca_op.fit_transform(normalize(namedemb) if do_norm else namedemb)
-        data = data.assign(pca1=pca2d[:,0], pca2=pca2d[:,1])
+        data = data.assign(pca1=-1 * pca2d[:,0], pca2=pca2d[:,1])
 
     if 'umap' in extra_proj:
         from umap import UMAP
         uop = UMAP(verbose=True, n_jobs=-1, min_dist=0.01, metric='cosine')
         u2d = uop.fit_transform(namedemb)
-        data = data.assign(umap1=u2d[:,0], umap2=u2d[:,1])
+        data = data.assign(umap1=-1 * u2d[:,0], umap2=u2d[:,1])
 
     from nomic import atlas
 
