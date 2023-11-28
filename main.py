@@ -223,17 +223,12 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
                     _, _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
                     reclosses, dtf_rec = decoder_loss(recovered, batch, mask)
                     dtf_match_loss = F.mse_loss(dtf_rec, dtf_orig)
-                    # distloss = F.mse_loss(orig, recovered)
-                    # margin = 0.1
-                    # ocdiff = (orig != corrupted).max(dim=2).values.max(dim=0).values.float()
-                    # rec_corrupt_err = ((recovered-corrupted).pow(2).mean(dim=2).mean(dim=0) * ocdiff).sum() / ocdiff.sum()
-                    # repel_loss = F.relu(margin - rec_corrupt_err)
+
                     all_losses = {}
                     # all_losses.update({f"enc/{k}": v for k, v in enclosses.items()})
                     all_losses.update({f"rec/{k}": v for k, v in reclosses.items()})
                     all_losses["dt_match"] = dtf_match_loss
-                    # all_losses['dist_loss'] = distloss
-                    # all_losses['repel_loss'] = repel_loss
+
                     weighted_loss = lossweighter.forward(
                         [lv for _, lv in sorted(all_losses.items())]
                     )
