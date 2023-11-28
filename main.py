@@ -28,7 +28,7 @@ cfg = Config(
     embedding_init_std=1 / 256.0,
     tied_encoder_decoder_emb=True,
     entity_emb_normed=False,
-    cos_sim_decode_entity=True,
+    cos_sim_decode_entity=False,
     transformer_dim=256,
     transformer_heads=8,
     transformer_layers=12,
@@ -248,7 +248,7 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
     wandb.finish()
 
 
-def upload_atlas(filename: str, do_norm=True):
+def upload_atlas(filename: str, do_norm=True, extra_proj=['pca', 'umap']):
     sd = torch.load(filename)
     sd = {k.replace('_orig_mod.', ''): v for k, v in sd.items()}
     model.load_state_dict(sd)
@@ -291,12 +291,24 @@ def upload_atlas(filename: str, do_norm=True):
         .fillna("N/A")
     )
     namedemb = entemb[cmdf.index]
+    data=cmdf.reset_index(drop=True)
+    if 'pca' in extra_proj:
+        from sklearn.decomposition import PCA
+        pca_op = PCA(n_components=2)
+        pca2d = pca_op.fit_transform(normalize(namedemb) if do_norm else namedemb)
+        data = data.assign(pca1=pca2d[:,0], pca2=pca2d[:,1])
+
+    if 'umap' in extra_proj:
+        from umap import UMAP
+        uop = UMAP(verbose=True, n_jobs=-1, min_dist=0.01, metric='cosine')
+        u2d = uop.fit_transform(namedemb)
+        data = data.assign(umap1=u2d[:,0], umap2=u2d[:,1])
 
     from nomic import atlas
 
     atlas.map_embeddings(
         normalize(namedemb) if do_norm else namedemb,
-        data=cmdf.reset_index(drop=True),
+        data=data,
         name="fecentrep-2" + ("-norm" if do_norm else "") + f"-{Path(filename).stem}",
         colorable_fields=["CMTE_TP", "CMTE_DSGN", "ORG_TP", "CMTE_PTY_AFFILIATION"],
         id_field="CMTE_ID",

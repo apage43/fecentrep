@@ -16,3 +16,5 @@ fastparquet
 dask[distributed]
 fire
 nomic
+accelerate
+umap-learn[plot]
