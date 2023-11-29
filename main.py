@@ -26,8 +26,8 @@ dataset, df, labelers = fecdata.prepare(df)
 
 cfg = Config(
     embedding_init_std=1 / 384.0,
-    tied_encoder_decoder_emb=True,
-    entity_emb_normed=False,
+    tied_encoder_decoder_emb=False,
+    entity_emb_normed=True,
     cos_sim_decode_entity=False,
     transformer_dim=384,
     transformer_heads=12,
@@ -35,7 +35,7 @@ cfg = Config(
     entity_dim=384,
 )
 lr = 1e-3
-n_epochs = 64
+n_epochs = 128
 model = TabularDenoiser(
     cfg,
     n_entities=max(dataset["src"].max(), dataset["dst"].max()) + 1,
@@ -116,12 +116,31 @@ dtsks = sorted(k for k in dataset.keys() if k.startswith("scaled_dt_"))
 
 
 def decoder_loss(encoded, batch, mask):
-    srclogits, dstlogits, etlogits, ttlogits, amtd, amtpos, maskpred, dt_feat = model.decoder(
-        encoded, model.encoder
-    )
+    (
+        srclogits,
+        dstlogits,
+        etlogits,
+        ttlogits,
+        amtd,
+        amtpos,
+        maskpred,
+        dt_feat,
+    ) = model.decoder(encoded, model.encoder)
     if model.config.cos_sim_decode_entity:
-        srcloss = F.mse_loss(srclogits, F.one_hot(batch["src"].squeeze(), srclogits.shape[-1]).to(torch.float)) * 1000.0
-        dstloss = F.mse_loss(dstlogits, F.one_hot(batch["dst"].squeeze(), dstlogits.shape[-1]).to(torch.float)) * 1000.0
+        srcloss = (
+            F.mse_loss(
+                srclogits,
+                F.one_hot(batch["src"].squeeze(), srclogits.shape[-1]).to(torch.float),
+            )
+            * 1000.0
+        )
+        dstloss = (
+            F.mse_loss(
+                dstlogits,
+                F.one_hot(batch["dst"].squeeze(), dstlogits.shape[-1]).to(torch.float),
+            )
+            * 1000.0
+        )
     else:
         srcloss = F.cross_entropy(srclogits, batch["src"].squeeze())
         dstloss = F.cross_entropy(dstlogits, batch["dst"].squeeze())
@@ -185,7 +204,9 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
                     for i, batch in enumerate(t):
                         batch = {k: v.to(device) for k, v in batch.items()}
                         orig, corrupted, recovered, mask = model(batch)
-                        _, _, _, _, _, _, _, dtf_orig = model.decoder(orig, model.encoder)
+                        _, _, _, _, _, _, _, dtf_orig = model.decoder(
+                            orig, model.encoder
+                        )
                         reclosses, dtf_rec = decoder_loss(recovered, batch, mask)
                         dtf_match_loss = F.mse_loss(dtf_rec, dtf_orig)
                         all_losses = {}
@@ -248,9 +269,9 @@ def train(squeeze: Optional[str] = None, epochs=n_epochs):
     wandb.finish()
 
 
-def upload_atlas(filename: str, do_norm=True, extra_proj=['pca', 'umap']):
-    sd = torch.load(filename)
-    sd = {k.replace('_orig_mod.', ''): v for k, v in sd.items()}
+def upload_atlas(filename: str, do_norm=True, extra_proj=["pca", "umap"]):
+    sd = torch.load(filename, map_location=torch.device("cpu"))
+    sd = {k.replace("_orig_mod.", ""): v for k, v in sd.items()}
     model.load_state_dict(sd)
     entemb = model.encoder.entity_embeddings.weight.detach().cpu().numpy()
     print(entemb.shape)
@@ -280,6 +301,40 @@ def upload_atlas(filename: str, do_norm=True, extra_proj=['pca', 'umap']):
         )
         return cm
 
+    dsgn_labels = {
+        "A": "Authorized",
+        "B": "Lobbyist/Registrant PAC",
+        "D": "Leadership PAC",
+        "J": "Joint fundraiser",
+        "P": "Principal",
+        "U": "Unauthorized",
+    }
+    tp_labels = {
+        "C": "Communication cost",
+        "D": "Delegate committee",
+        "E": "Electioneering communication",
+        "H": "House",
+        "I": "Independent expenditor",
+        "N": "PAC - nonqualified",
+        "O": "Independent expenditure-only (Super PAC)",
+        "P": "Presidential",
+        "Q": "PAC - qualified",
+        "S": "Senate",
+        "U": "Single-candidate independent expenditure",
+        "V": "Hybrid - nonqualified",
+        "W": "Hybrid - qualified",
+        "X": "Party - nonqualified",
+        "Y": "Party - qualified",
+        "Z": "National party nonfederal account",
+    }
+    org_labels = {
+        "C": "Corporation",
+        "L": "Labor organization",
+        "M": "Membership organization",
+        "T": "Trade association",
+        "V": "Cooperative",
+        "W": "Corporation without capital stock",
+    }
     cmdf = (
         idorder.join(
             pd.concat([read_cm(2020), read_cm(2022), read_cm(2024)])
@@ -288,21 +343,24 @@ def upload_atlas(filename: str, do_norm=True, extra_proj=['pca', 'umap']):
             on="CMTE_ID",
         )
         .dropna(subset=["CMTE_NM"])
+        .replace(dict(CMTE_TP=tp_labels, CMTE_DSGN=dsgn_labels, ORG_TP=org_labels))
         .fillna("N/A")
     )
     namedemb = entemb[cmdf.index]
-    data=cmdf.reset_index(drop=True)
-    if 'pca' in extra_proj:
+    data = cmdf.reset_index(drop=True)
+    if "pca" in extra_proj:
         from sklearn.decomposition import PCA
+
         pca_op = PCA(n_components=2)
         pca2d = pca_op.fit_transform(normalize(namedemb) if do_norm else namedemb)
-        data = data.assign(pca1=-1 * pca2d[:,0], pca2=pca2d[:,1])
+        data = data.assign(pca1=-1 * pca2d[:, 0], pca2=pca2d[:, 1])
 
-    if 'umap' in extra_proj:
+    if "umap" in extra_proj:
         from umap import UMAP
-        uop = UMAP(verbose=True, n_jobs=-1, metric='cosine')
+
+        uop = UMAP(verbose=True, n_jobs=-1, metric="cosine")
         u2d = uop.fit_transform(namedemb)
-        data = data.assign(umap1=-1 * u2d[:,0], umap2=u2d[:,1])
+        data = data.assign(umap1=-1 * u2d[:, 0], umap2=u2d[:, 1])
 
     from nomic import atlas
 
