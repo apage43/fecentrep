@@ -26,7 +26,7 @@ dataset, df, labelers = fecdata.prepare(df)
 
 cfg = Config(
     embedding_init_std=1 / 384.0,
-    tied_encoder_decoder_emb=False,
+    tied_encoder_decoder_emb=True,
     entity_emb_normed=True,
     cos_sim_decode_entity=False,
     transformer_dim=384,
