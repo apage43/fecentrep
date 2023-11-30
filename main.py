@@ -47,7 +47,7 @@ tds = TabDataset(dataset)
 # model = torch.compile(model)
 
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 9_000
+batch_size = 7_000
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
@@ -358,7 +358,7 @@ def upload_atlas(filename: str, do_norm=True, extra_proj=["pca", "umap"]):
     if "umap" in extra_proj:
         from umap import UMAP
 
-        uop = UMAP(verbose=True, n_jobs=-1, metric="cosine")
+        uop = UMAP(verbose=True, n_jobs=-1, metric="cosine" if do_norm else "euclidean")
         u2d = uop.fit_transform(namedemb)
         data = data.assign(umap1=-1 * u2d[:, 0], umap2=u2d[:, 1])
 
