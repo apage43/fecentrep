@@ -27,11 +27,11 @@ dataset, df, labelers = fecdata.prepare(df)
 cfg = Config(
     embedding_init_std=1e-5,
     tied_encoder_decoder_emb=True,
-    entity_emb_normed=False,
-    cos_sim_decode_entity=True,
+    entity_emb_normed=True,
+    cos_sim_decode_entity=False,
     transformer_dim=384,
     transformer_heads=12,
-    transformer_layers=14,
+    transformer_layers=10,
     entity_dim=384,
 )
 lr = 1e-3

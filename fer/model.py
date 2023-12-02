@@ -103,9 +103,11 @@ class FECEncoder(nn.Module):
             nn.init.normal_(self.ttype_embeddings.weight, std=config.embedding_init_std)
         self.posneg_encoding = nn.Embedding(2, config.transformer_dim)
         self.amt_encoder = nn.Linear(1, config.transformer_dim)
+        self.noisep_encoder = nn.Linear(1, config.transformer_dim)
         self.dt_encoder = DatetimeEncoder(config)
 
     def forward(self, batch: Dict[str, torch.Tensor]):
+        noisep = self.noisep_encoder(batch["p"]).squeeze()
         srcf = self.entity_embeddings(batch["src"]).squeeze()
         dstf = self.entity_embeddings(batch["dst"]).squeeze()
         if self.config.entity_emb_normed:
@@ -113,10 +115,10 @@ class FECEncoder(nn.Module):
             dstf = F.normalize(dstf, dim=-1)
         etypef = self.etype_embeddings(batch["etype"]).squeeze()
         ttypef = self.ttype_embeddings(batch["ttype"]).squeeze()
-        amtf = F.gelu(self.amt_encoder(batch["amt"]))
-        amtsignf = F.gelu(self.posneg_encoding(batch["amt_pos"]).squeeze())
+        amtf = self.amt_encoder(batch["amt"])
+        amtsignf = self.posneg_encoding(batch["amt_pos"]).squeeze()
         dtf = self.dt_encoder(batch)
-        seq = torch.stack([srcf, dstf, etypef, ttypef, amtf + amtsignf, dtf])
+        seq = torch.stack([srcf, dstf, etypef, ttypef, amtf + amtsignf, dtf, noisep])
         return seq
 
 
@@ -133,7 +135,7 @@ class BatchSwapNoise(nn.Module):
                 return out
             corrupt = torch.bernoulli(
                 torch.ones((x.shape)).to(x.device)
-                * (p[:, None] if isinstance(p, torch.Tensor) else p)
+                * p # (p[:, None] if isinstance(p, torch.Tensor) else p)
             )
             noised = torch.where(corrupt == 1, x[torch.randperm(x.shape[0])], x)
             corrupt = ~torch.isclose(noised, x)
@@ -189,11 +191,14 @@ class FECDecoder(nn.Module):
 
     def forward(self, x, encoder: FECEncoder):
         if self.config.cos_sim_decode_entity:
+
             def maybenorm(x):
-                return F.normalize(x)#, dim=-1)
+                return F.normalize(x)  # , dim=-1)
         else:
+
             def maybenorm(x):
-                return x 
+                return x
+
         if self.entdec is not None:
             srclogits = F.linear(maybenorm(x[0]), maybenorm(self.entdec.weight))
             dstlogits = F.linear(maybenorm(x[1]), maybenorm(self.entdec.weight))
@@ -204,7 +209,7 @@ class FECDecoder(nn.Module):
             dstlogits = F.linear(
                 maybenorm(x[1]), maybenorm(encoder.entity_embeddings.weight)
             )
-        mask = self.corruptdec(x)
+        mask = self.corruptdec(x[:6])
         mask = einops.rearrange(mask, "s b e -> b (s e)")
         etlogits = self.etdec(x[2])
         ttlogits = self.ttdec(x[3])
@@ -232,8 +237,8 @@ class TabularDenoiser(nn.Module):
             attn_layers=Encoder(
                 dim=config.transformer_dim,
                 depth=config.transformer_layers,
-                #use_rmsnorm=True,
-                #deepnorm=True,
+                # use_rmsnorm=True,
+                # deepnorm=True,
                 ff_glu=True,
                 ff_swish=True,
                 ff_mult=4,
@@ -249,11 +254,17 @@ class TabularDenoiser(nn.Module):
         )
 
     def forward(self, batch: Dict[str, torch.Tensor]):
-        original = self.encoder(batch)
-        noised = self.bnoise(batch, p=0.25)
-        del noised['p']
-        corrupted = self.encoder({k: t for (k, (t, _mask)) in noised.items() if k != 'p'})
-        mask = torch.hstack([noised[c][1] for c in ['src', 'dst', 'etype', 'ttype', 'amt', 'amt_pos']])
+        p = torch.rand(batch["src"].size(), device=batch["src"].device)
+        original = self.encoder(batch | dict(p=torch.zeros_like(p)))
+        noised = self.bnoise(batch, p=p)
+        nomask = noised.copy()
+        for k in nomask:
+            if k != "p":
+                nomask[k] = nomask[k][0]
+        corrupted = self.encoder(nomask)
+        mask = torch.hstack(
+            [noised[c][1] for c in ["src", "dst", "etype", "ttype", "amt", "amt_pos"]]
+        )
         recovered = self.tfenc(einops.rearrange(corrupted, "s b d -> b s d"))
         recovered = einops.rearrange(recovered, "b s d -> s b d")
         return original, corrupted, recovered, mask
