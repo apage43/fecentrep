@@ -25,13 +25,13 @@ dataset, df, labelers = fecdata.prepare(df)
 
 
 cfg = Config(
-    embedding_init_std=1 / 384.0,
+    embedding_init_std=1e-5,
     tied_encoder_decoder_emb=True,
-    entity_emb_normed=True,
-    cos_sim_decode_entity=False,
+    entity_emb_normed=False,
+    cos_sim_decode_entity=True,
     transformer_dim=384,
     transformer_heads=12,
-    transformer_layers=12,
+    transformer_layers=14,
     entity_dim=384,
 )
 lr = 1e-3
@@ -47,7 +47,7 @@ tds = TabDataset(dataset)
 # model = torch.compile(model)
 
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 7_000
+batch_size = 6_000
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
@@ -132,14 +132,14 @@ def decoder_loss(encoded, batch, mask):
                 srclogits,
                 F.one_hot(batch["src"].squeeze(), srclogits.shape[-1]).to(torch.float),
             )
-            * 1000.0
+            * srclogits.shape[-1]
         )
         dstloss = (
             F.mse_loss(
                 dstlogits,
                 F.one_hot(batch["dst"].squeeze(), dstlogits.shape[-1]).to(torch.float),
             )
-            * 1000.0
+            * dstlogits.shape[-1]
         )
     else:
         srcloss = F.cross_entropy(srclogits, batch["src"].squeeze())
@@ -348,12 +348,18 @@ def upload_atlas(filename: str, do_norm=True, extra_proj=["pca", "umap"]):
     )
     namedemb = entemb[cmdf.index]
     data = cmdf.reset_index(drop=True)
-    if "pca" in extra_proj:
+    pca = [p for p in extra_proj if p.startswith("pca")]
+    if pca:
+        pca = pca[0]
+        nc = 2
+        if ":" in pca:
+            nc = int(pca[4:])
         from sklearn.decomposition import PCA
-
-        pca_op = PCA(n_components=2)
-        pca2d = pca_op.fit_transform(normalize(namedemb) if do_norm else namedemb)
-        data = data.assign(pca1=-1 * pca2d[:, 0], pca2=pca2d[:, 1])
+        print(f'fit {pca}')
+        pca_op = PCA(n_components=nc)
+        pca_out = pca_op.fit_transform(normalize(namedemb) if do_norm else namedemb)
+        for i in range(nc):
+            data = data.assign(**{f"pca{i+1}": pca_out[:, i]})
 
     if "umap" in extra_proj:
         from umap import UMAP
