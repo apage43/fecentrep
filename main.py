@@ -27,14 +27,14 @@ dataset, df, labelers = fecdata.prepare(df)
 cfg = Config(
     embedding_init_std=1e-5,
     tied_encoder_decoder_emb=True,
-    entity_emb_normed=True,
+    entity_emb_normed=False,
     cos_sim_decode_entity=False,
-    transformer_dim=384,
-    transformer_heads=12,
-    transformer_layers=10,
-    entity_dim=384,
+    transformer_dim=256,
+    transformer_heads=8,
+    transformer_layers=8,
+    entity_dim=256,
 )
-lr = 1e-3
+lr = 4e-3
 n_epochs = 128
 model = TabularDenoiser(
     cfg,
@@ -47,20 +47,20 @@ tds = TabDataset(dataset)
 # model = torch.compile(model)
 
 splitgen = torch.Generator().manual_seed(41)
-batch_size = 6_000
+batch_size = 12_000
 train_set, val_set = random_split(tds, [0.9, 0.1], generator=splitgen)
 tdl = DataLoader(
     train_set,
     batch_size=batch_size,
     shuffle=True,
-    num_workers=8,
+    num_workers=12,
     persistent_workers=True,
 )
 vdl = DataLoader(
     val_set,
     batch_size=batch_size,
     shuffle=False,
-    num_workers=8,
+    num_workers=12,
     persistent_workers=True,
 )
 

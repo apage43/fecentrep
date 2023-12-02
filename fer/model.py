@@ -135,7 +135,7 @@ class BatchSwapNoise(nn.Module):
                 return out
             corrupt = torch.bernoulli(
                 torch.ones((x.shape)).to(x.device)
-                * p # (p[:, None] if isinstance(p, torch.Tensor) else p)
+                * p  # (p[:, None] if isinstance(p, torch.Tensor) else p)
             )
             noised = torch.where(corrupt == 1, x[torch.randperm(x.shape[0])], x)
             corrupt = ~torch.isclose(noised, x)
@@ -252,9 +252,17 @@ class TabularDenoiser(nn.Module):
             ),
             post_emb_norm=False,
         )
+        self.register_buffer(
+            "pd_mean", torch.tensor([0.5]), persistent=False
+        )
+        self.register_buffer(
+            "pd_std", torch.tensor([1.0]), persistent=False
+        )
 
     def forward(self, batch: Dict[str, torch.Tensor]):
-        p = torch.rand(batch["src"].size(), device=batch["src"].device)
+        # ep = torch.rand(batch["src"].size(), device=batch["src"].device)
+        pdist = torch.distributions.Normal(self.pd_mean, self.pd_std)
+        p = pdist.sample(batch["src"].size()).clamp(0.0, 0.99)[:,0]
         original = self.encoder(batch | dict(p=torch.zeros_like(p)))
         noised = self.bnoise(batch, p=p)
         nomask = noised.copy()
